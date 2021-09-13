@@ -53,21 +53,17 @@ enum LinuxFileFlags {
 /// Wrapper around a Linux syscall with three arguments. It returns
 /// the syscall result (or error code) that gets stored in rax.
 unsafe fn syscall_3(num: u64, arg1: u64, arg2: u64, arg3: u64) -> i64 {
-    asm!(
-        "mov rax, {0}",
-        "mov rdi, {1}",
-        "mov rsi, {2}",
-        "mov rdx, {3}",
-        "syscall",
-        in(reg) num,
-        in(reg) arg1,
-        in(reg) arg2,
-        in(reg) arg3,
-    );
     let res;
     asm!(
-        "mov {}, rax",
-        out(reg) res
+        // there is no need to write "mov"-instructions, see below
+        "syscall",
+        // from 'in("rax")' the compiler will
+        // generate corresponding 'mov'-instructions
+        in("rax") num,
+        in("rdi") arg1,
+        in("rsi") arg2,
+        in("rdx") arg3,
+        lateout("rax") res,
     );
     res
 }
