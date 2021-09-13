@@ -6,6 +6,8 @@ system call to Linux without libc or another library. It prints
 After that, it opens/creates `./foo.txt`, writes data to it and read
 the data from it afterwards - everything with manual syscalls.
 
+Apart from `write`, it also implements `writev`, `open`, and `read`.
+
 Furthermore, the file includes the relevant pointers to the Linux
 source code on Github where you can find the relevant information.
 

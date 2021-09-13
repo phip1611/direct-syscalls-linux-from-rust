@@ -12,8 +12,9 @@
 
 #![feature(asm)]
 
-use crate::LinuxFileFlags::{O_APPEND, O_WRONLY, O_CREAT, O_RDWR, O_RDONLY};
-use std::fs::read;
+use crate::LinuxFileFlags::{O_APPEND, O_CREAT, O_RDONLY, O_WRONLY};
+use std::ffi::CStr;
+use std::os::raw::c_char;
 #[cfg(any(not(target_os = "linux"), not(target_arch = "x86_64")))]
 compile_error!("Only works on x86_64 Linux");
 
@@ -23,6 +24,7 @@ enum LinuxSysCalls {
     Read = 0,
     Write = 1,
     Open = 2,
+    WriteV = 20,
 }
 
 /// Flags that can be used for the `open()` system call.
@@ -34,7 +36,7 @@ enum LinuxSysCalls {
 ///
 /// Linux defines each variant using the octal number format.
 #[repr(u32)]
-#[allow(non_camel_case_types)]
+#[allow(non_camel_case_types, unused)]
 enum LinuxFileFlags {
     /// Open for reading only.
     O_RDONLY = 0o0,
@@ -89,14 +91,7 @@ fn sys_open(path: *const u8, flags: u32, umode: u16) -> i64 {
 
 /// Opens a file. Works like `open` in C.
 fn sys_read(fd: u64, buf: *mut u8, size: u64) -> i64 {
-    unsafe {
-        syscall_3(
-            LinuxSysCalls::Read as u64,
-            fd,
-            buf as u64,
-            size as u64,
-        )
-    }
+    unsafe { syscall_3(LinuxSysCalls::Read as u64, fd, buf as u64, size as u64) }
 }
 
 /// Small example that prints "hello world" to stdout/the console, by
@@ -176,4 +171,56 @@ fn main() {
         let msg = "File is longer than the buffer :(\n";
         sys_write(STDOUT_FD, msg.as_ptr(), msg.len() as u64);
     }
+
+    // ------------------------------------------------------------------------
+    // Test "hello world" with "writev" system call
+
+    let msgs = [
+        // important that all strings are null terminated!
+        "Hello \0", "Welt \0", "via writev()\0", "\n\0",
+    ]
+    // - "s.as_ptr()" -> rust string slice to raw byte pointer
+    // - construct null terminated c strings from it
+    .map(|s| unsafe { CStr::from_ptr(s.as_ptr() as *const c_char) });
+    // println!("{:#?}", msgs);
+    // ::<4>: for the stack array with the correct size during compile time
+    let res = writev::<4>(STDOUT_FD, &msgs);
+    println!("res={}", res);
+}
+
+/// Linux write system call. Works like `writev()` in C.
+/// Struct iovec is defined here:
+/// https://elixir.bootlin.com/linux/latest/source/include/uapi/linux/uio.h#L17
+fn sys_writev(fd: u64, iovec: *const u8, vlen: u64) -> i64 {
+    unsafe { syscall_3(LinuxSysCalls::WriteV as u64, fd, iovec as u64, vlen) }
+}
+
+/// Convenient wrapper around [`sys_writev`]. A high level interface that maps the request
+/// into the low-level interface. It takes a list of C-Strings and write all of them at once
+/// to the kernel.
+fn writev<const N: usize>(fd: u64, msgs: &[&CStr]) -> i64 {
+    // in-place definition of the struct
+    #[derive(Copy, Clone)]
+    #[repr(C)]
+    struct iovec {
+        iov_base: *const c_char,
+        len: u64,
+    }
+    impl Default for iovec {
+        fn default() -> Self {
+            Self {
+                iov_base: std::ptr::null(),
+                len: 0,
+            }
+        }
+    }
+    // stack-allocated array
+    let mut vector: [iovec; N] = [iovec::default(); N];
+    // copy the C-string pointers into the iovec-array
+    for (i, cstr) in msgs.iter().enumerate() {
+        vector[i].iov_base = cstr.as_ptr();
+        vector[i].len = cstr.to_bytes().len() as u64
+    }
+    // execute the syscall
+    sys_writev(fd, vector.as_ptr() as *const u8, msgs.len() as u64)
 }
