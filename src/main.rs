@@ -10,9 +10,8 @@
 //! Here you can find the definition of the syscalls:
 //! https://github.com/torvalds/linux/blob/master/include/linux/syscalls.h
 
-#![feature(asm)]
-
 use crate::LinuxFileFlags::{O_APPEND, O_CREAT, O_RDONLY, O_WRONLY};
+use std::arch::asm;
 use std::ffi::CStr;
 use std::os::raw::c_char;
 #[cfg(any(not(target_os = "linux"), not(target_arch = "x86_64")))]
@@ -173,7 +172,10 @@ fn main() {
 
     let msgs = [
         // important that all strings are null terminated!
-        "Hello \0", "Welt \0", "via writev()\0", "\n\0",
+        "Hello \0",
+        "Welt \0",
+        "via writev()\0",
+        "\n\0",
     ]
     // - "s.as_ptr()" -> rust string slice to raw byte pointer
     // - construct null terminated c strings from it
@@ -200,7 +202,7 @@ fn writev<const N: usize>(fd: u64, msgs: &[&CStr]) -> i64 {
     #[repr(C)]
     struct iovec {
         iov_base: *const c_char,
-        len: u64,
+        len: usize,
     }
     impl Default for iovec {
         fn default() -> Self {
@@ -215,7 +217,7 @@ fn writev<const N: usize>(fd: u64, msgs: &[&CStr]) -> i64 {
     // copy the C-string pointers into the iovec-array
     for (i, cstr) in msgs.iter().enumerate() {
         vector[i].iov_base = cstr.as_ptr();
-        vector[i].len = cstr.to_bytes().len() as u64
+        vector[i].len = cstr.to_bytes().len()
     }
     // execute the syscall
     sys_writev(fd, vector.as_ptr() as *const u8, msgs.len() as u64)
